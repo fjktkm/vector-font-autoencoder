@@ -1,0 +1,40 @@
+{
+	"name": "uv",
+	"image": "ghcr.io/astral-sh/uv:debian",
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {}
+	},
+	"hostRequirements": {
+		"gpu": "optional"
+	},
+	"mounts": [
+		{
+			"source": "uv-cache",
+			"target": "/root/.cache/uv",
+			"type": "volume"
+		},
+		{
+			"target": "${containerWorkspaceFolder}/.venv",
+			"type": "volume"
+		},
+		{
+			"source": "torchfont",
+			"target": "${containerWorkspaceFolder}/data",
+			"type": "volume"
+		}
+	],
+	"containerEnv": {
+		"UV_LINK_MODE": "copy"
+	},
+	"postCreateCommand": "uv sync",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"charliermarsh.ruff",
+				"mechatroner.rainbow-csv",
+				"ms-python.python",
+				"tamasfe.even-better-toml"
+			]
+		}
+	}
+}

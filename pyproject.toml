@@ -1,0 +1,53 @@
+[project]
+name = "vector-font-disentanglement"
+version = "0.1.0"
+description = "Total Disentanglement of Vector Fonts into Style and Character Class Features"
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [{ name = "fjktkm", email = "fjktkm@gmail.com" }]
+dependencies = [
+    "fonttools>=4.59.0",
+    "lightning>=2.5.3",
+    "matplotlib>=3.10.5",
+    "numpy>=2.3.1",
+    "seaborn>=0.13.2",
+    "tensorboard>=2.20.0",
+    "torch>=2.7.1",
+    "torchfont>=0.2.0",
+    "tqdm>=4.67.1",
+]
+
+[project.scripts]
+train = "vector_font_disentanglement.train:main"
+predict = "vector_font_disentanglement.predict:main"
+tb = "vector_font_disentanglement.board:main"
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["ruff>=0.12.4"]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'darwin'" },
+    { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["D", "S", "T", "EXE"]
