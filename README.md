@@ -1,3 +1,5 @@
 # Vector Font Autoencoder
 
-Sequence-to-sequence autoencoder for scalable reconstruction and generation of vector glyphs.
+藤岡 拓夢, 田中 剛平
+パッチ埋め込みを用いた Transformer によるベクターフォントの再構成
+第28回情報論的学習理論ワークショップ, ポスター発表, 11月13日 (2025).
