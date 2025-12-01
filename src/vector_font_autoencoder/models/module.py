@@ -1,5 +1,5 @@
 import math
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 import torch
 import torch.nn.functional as f
@@ -10,89 +10,6 @@ from torchfont.io.pens import (
     TYPE_DIM,
     TYPE_TO_IDX,
 )
-
-
-class FontDisentangler(nn.Module):
-    def __init__(  # noqa: PLR0913
-        self,
-        num_style_classes: int,
-        num_content_classes: int,
-        patch_size: int,
-        d_model: int,
-        nhead: int,
-        dim_feedforward: int,
-        num_layers: int,
-        dropout: float = 0.1,
-    ) -> None:
-        super().__init__()
-        self.embed = PatchEmbedding(d_model, patch_size, dropout)
-        self.pos_enc = RotaryEmbedding(d_model, dropout)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
-        self.bos_token = nn.Parameter(torch.zeros(1, 1, d_model))
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=d_model,
-                nhead=nhead,
-                dim_feedforward=dim_feedforward,
-                dropout=dropout,
-                batch_first=True,
-                norm_first=True,
-            ),
-            num_layers=num_layers,
-        )
-        self.style_proj = nn.Linear(d_model, d_model)
-        self.content_proj = nn.Linear(d_model, d_model)
-        self.grl_style = GradientReversal()
-        self.grl_content = GradientReversal()
-        self.style_discriminator = nn.Linear(d_model, num_style_classes)
-        self.content_discriminator = nn.Linear(d_model, num_content_classes)
-        self.decoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(
-                d_model=d_model,
-                nhead=nhead,
-                dim_feedforward=dim_feedforward,
-                dropout=dropout,
-                batch_first=True,
-                norm_first=True,
-            ),
-            num_layers=num_layers,
-        )
-        self.unembed = PatchUnembedding(d_model, patch_size)
-
-    def forward(  # noqa: PLR0913
-        self,
-        ops: Tensor,
-        coords: Tensor,
-        src_mask: Tensor | None,
-        tgt_mask: Tensor | None,
-        src_padding_mask: Tensor | None,
-        tgt_padding_mask: Tensor | None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        b = ops.size(0)
-        paches = self.embed(ops, coords)
-        cls = self.cls_token.expand(b, 1, -1)
-        src = torch.cat([cls, paches], dim=1)
-        memory = self.encoder(
-            self.pos_enc(src),
-            mask=src_mask,
-            src_key_padding_mask=src_padding_mask,
-        )
-        summary = memory[:, 0, :]
-        style_feat = self.style_proj(summary)
-        content_feat = self.content_proj(summary)
-        style_logits = self.style_discriminator(self.grl_style(style_feat))
-        content_logits = self.content_discriminator(self.grl_content(content_feat))
-        combined = (style_feat + content_feat).unsqueeze(1)
-        bos = self.bos_token.expand(b, 1, -1)
-        tgt = torch.cat([combined, bos, paches[:, :-1, :]], dim=1)
-        output = self.decoder(
-            self.pos_enc(tgt),
-            mask=tgt_mask,
-            src_key_padding_mask=tgt_padding_mask,
-        )
-        pred = output[:, 1:, :]
-        ops_logits, coords_pred = self.unembed(pred)
-        return ops_logits, coords_pred, style_logits, content_logits
 
 
 class FontAutoencoder(nn.Module):
@@ -254,22 +171,6 @@ class RotaryEmbedding(nn.Module):
         x1, x2 = x[..., :1], x[..., 1:]
         y = torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin], dim=-1)
         return y.view(batch, seq_len, dim)
-
-
-class _GRLFn(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx: Any, x: Tensor) -> Tensor:  # noqa: ANN401, ARG004
-        return x
-
-    @staticmethod
-    def backward(ctx: Any, *grad_outputs: Tensor) -> tuple[Tensor]:  # noqa: ANN401, ARG004
-        return (-grad_outputs[0],)
-
-
-class GradientReversal(nn.Module):
-    def forward(self, x: Tensor) -> Tensor:
-        return cast("Tensor", _GRLFn.apply(x))
-
 
 class ReconstructionLoss(nn.Module):
     coord_mask: Annotated[Tensor, "buffer"]

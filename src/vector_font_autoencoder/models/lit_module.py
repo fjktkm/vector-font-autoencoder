@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
@@ -8,16 +7,12 @@ from lightning.pytorch.utilities.types import OptimizerLRScheduler
 from torch import Tensor, nn
 from torch.optim import AdamW
 
-from vector_font_disentanglement.models.module import (
+from vector_font_autoencoder.models.module import (
     FontAutoencoder,
-    FontDisentangler,
     ReconstructionLoss,
 )
-from vector_font_disentanglement.models.optim import WarmupCosineAnnealingLR
-from vector_font_disentanglement.utils.visualize import plot_glyph_tensor
-
-if TYPE_CHECKING:
-    from lightning.pytorch.utilities.combined_loader import CombinedLoader
+from vector_font_autoencoder.models.optim import WarmupCosineAnnealingLR
+from vector_font_autoencoder.utils.visualize import plot_glyph_tensor
 
 
 def create_masks(
@@ -54,13 +49,8 @@ def create_masks(
     return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
 
 
-def combine_fn(
-    batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    types_list, coords_list, style_label_list, content_label_list = zip(
-        *batch,
-        strict=True,
-    )
+def combine_fn(batch: list[tuple[Tensor, Tensor]]) -> tuple[Tensor, Tensor]:
+    types_list, coords_list = zip(*batch, strict=True)
 
     sizes = [t.size(0) for t in types_list]
     offsets = np.concatenate(([0], np.cumsum(sizes)))
@@ -83,204 +73,7 @@ def combine_fn(
         combined_types[start:end, :seq_len] = types
         combined_coords[start:end, :seq_len] = coords
 
-    combined_style_label = torch.cat(style_label_list, 0)
-    combined_content_label = torch.cat(content_label_list, 0)
-
-    return combined_types, combined_coords, combined_style_label, combined_content_label
-
-
-class LitFontDisentangler(LightningModule):
-    def __init__(  # noqa: PLR0913
-        self,
-        num_style_classes: int,
-        num_content_classes: int,
-        patch_size: int = 32,
-        d_model: int = 768,
-        nhead: int = 12,
-        dim_feedforward: int = 3072,
-        num_layers: int = 6,
-        lr: float = 1e-3,
-    ) -> None:
-        super().__init__()
-        self.save_hyperparameters()
-        self.model = FontDisentangler(
-            num_style_classes=num_style_classes,
-            num_content_classes=num_content_classes,
-            patch_size=patch_size,
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            num_layers=num_layers,
-        )
-        self.recon_loss = ReconstructionLoss()
-        self.ce_style = nn.CrossEntropyLoss()
-        self.ce_content = nn.CrossEntropyLoss()
-        self.lr = lr
-
-    def forward(
-        self,
-        ops: Tensor,
-        coords: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_masks(ops)
-
-        return self.model(
-            ops=ops,
-            coords=coords,
-            src_mask=src_mask,
-            tgt_mask=tgt_mask,
-            src_padding_mask=src_padding_mask,
-            tgt_padding_mask=tgt_padding_mask,
-        )
-
-    def training_step(
-        self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
-        batch_idx: int,  # noqa: ARG002
-    ) -> Tensor:
-        ops, coords, style_idx, content_idx = combine_fn(batch)
-        ops_logits, coords_pred, style_logits, content_logits = self(ops, coords)
-
-        loss_recon = self.recon_loss(ops_logits, coords_pred, ops, coords)
-        loss_style = self.ce_style(style_logits, style_idx)
-        loss_content = self.ce_content(content_logits, content_idx)
-        loss = loss_recon + loss_style + loss_content
-
-        self.log(
-            "train/loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-        metrics = {
-            "train/loss_recon": loss_recon,
-            "train/loss_style": loss_style,
-            "train/loss_content": loss_content,
-        }
-        self.log_dict(
-            metrics,
-            on_step=True,
-            on_epoch=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-        return loss
-
-    def validation_step(
-        self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
-        batch_idx: int,
-    ) -> None:
-        ops, coords, style_idx, content_idx = combine_fn(batch)
-        ops_logits, coords_pred, style_logits, content_logits = self(ops, coords)
-
-        if self.trainer.global_rank == 0:
-            lg = self.trainer.logger
-            if isinstance(lg, (list, tuple)):
-                lg = lg[0]
-            log_dir = Path(lg.log_dir)  # type: ignore  # noqa: PGH003
-            log_dir.mkdir(parents=True, exist_ok=True)
-            ops0_pred = ops_logits[0].argmax(dim=-1).view(-1)
-            coords0_pred = coords_pred[0].view(-1, coords_pred.size(-1))
-            out_path = log_dir / f"preview_batch{batch_idx:02d}.pdf"
-            plot_glyph_tensor(ops0_pred, coords0_pred, out_path=out_path)
-
-        loss_recon = self.recon_loss(ops_logits, coords_pred, ops, coords)
-        loss_style = self.ce_style(style_logits, style_idx)
-        loss_content = self.ce_content(content_logits, content_idx)
-        loss = loss_recon + loss_style + loss_content
-
-        self.log(
-            "val/loss",
-            loss,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-        metrics = {
-            "val/loss_recon": loss_recon,
-            "val/loss_style": loss_style,
-            "val/loss_content": loss_content,
-        }
-        self.log_dict(
-            metrics,
-            on_epoch=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-
-    def test_step(
-        self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
-        batch_idx: int,  # noqa: ARG002
-    ) -> None:
-        ops, coords, style_idx, content_idx = combine_fn(batch)
-        ops_logits, coords_pred, style_logits, content_logits = self(ops, coords)
-
-        loss_recon = self.recon_loss(ops_logits, coords_pred, ops, coords)
-        loss_style = self.ce_style(style_logits, style_idx)
-        loss_content = self.ce_content(content_logits, content_idx)
-        loss = loss_recon + loss_style + loss_content
-
-        self.log(
-            "test/loss",
-            loss,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-        metrics = {
-            "test/loss_recon": loss_recon,
-            "test/loss_style": loss_style,
-            "test/loss_content": loss_content,
-        }
-        self.log_dict(
-            metrics,
-            on_epoch=True,
-            logger=True,
-            sync_dist=torch.distributed.is_initialized(),
-        )
-
-    def configure_optimizers(self) -> OptimizerLRScheduler:
-        no_decay = ["bias", "LayerNorm.weight"]
-
-        params = list(self.named_parameters())
-        decay_params = [
-            p
-            for n, p in params
-            if p.requires_grad and not any(nd in n for nd in no_decay)
-        ]
-        nodecay_params = [
-            p for n, p in params if p.requires_grad and any(nd in n for nd in no_decay)
-        ]
-
-        optimizer = AdamW(
-            [
-                {"params": decay_params},
-                {"params": nodecay_params, "weight_decay": 0.0},
-            ],
-            lr=self.lr,
-        )
-
-        total_steps = max(
-            1,
-            int(getattr(self.trainer, "estimated_stepping_batches", 0)),
-        )
-
-        scheduler = WarmupCosineAnnealingLR(
-            optimizer,
-            training_steps=total_steps,
-        )
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
-        }
+    return combined_types, combined_coords
 
 
 class LitFontAutoencoder(LightningModule):
@@ -323,10 +116,10 @@ class LitFontAutoencoder(LightningModule):
 
     def training_step(
         self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
+        batch: list[tuple[Tensor, Tensor]],
         batch_idx: int,  # noqa: ARG002
     ) -> Tensor:
-        ops, coords, _, _ = combine_fn(batch)
+        ops, coords = combine_fn(batch)
         ops_logits, coords_pred = self(ops, coords)
 
         loss = self.loss(ops_logits, coords_pred, ops, coords)
@@ -344,10 +137,10 @@ class LitFontAutoencoder(LightningModule):
 
     def validation_step(
         self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
+        batch: list[tuple[Tensor, Tensor]],
         batch_idx: int,
     ) -> None:
-        ops, coords, _, _ = combine_fn(batch)
+        ops, coords = combine_fn(batch)
         ops_logits, coords_pred = self(ops, coords)
 
         if self.trainer.global_rank == 0:
@@ -374,10 +167,10 @@ class LitFontAutoencoder(LightningModule):
 
     def test_step(
         self,
-        batch: list[tuple[Tensor, Tensor, Tensor, Tensor]],
+        batch: list[tuple[Tensor, Tensor]],
         batch_idx: int,  # noqa: ARG002
     ) -> None:
-        ops, coords, _, _ = combine_fn(batch)
+        ops, coords = combine_fn(batch)
         ops_logits, coords_pred = self(ops, coords)
 
         loss = self.loss(ops_logits, coords_pred, ops, coords)
@@ -393,11 +186,11 @@ class LitFontAutoencoder(LightningModule):
 
     def predict_step(
         self,
-        batch: tuple[Tensor, Tensor, Tensor, Tensor],
+        batch: tuple[Tensor, Tensor],
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        ops, coords, _, _ = batch
+        ops, coords = batch
 
         b = ops.size(0)
         patches = self.model.embed(ops, coords)
@@ -471,22 +264,20 @@ class LitFontAutoencoder(LightningModule):
                 out_path=pred_path,
             )
 
-    def on_predict_end(self) -> None:  # noqa: PLR0915
+    def on_predict_end(self) -> None:
         datamodule = getattr(self.trainer, "datamodule", None)
         if datamodule is None:
             return
         if not hasattr(datamodule, "interpolate_dataloader"):
             return
 
-        loader = cast("CombinedLoader", datamodule.interpolate_dataloader())
+        loader = datamodule.interpolate_dataloader()
 
         device = self.device
 
-        for batch_idx, batch in enumerate(loader):
-            sans_batch, serif_batch = batch[0]
-
-            sans_ops, sans_coords, _, _ = sans_batch
-            serif_ops, serif_coords, _, _ = serif_batch
+        for batch_idx, (sans_batch, serif_batch) in enumerate(loader):
+            sans_ops, sans_coords = sans_batch
+            serif_ops, serif_coords = serif_batch
 
             sans_ops = sans_ops.to(device)
             sans_coords = sans_coords.to(device)

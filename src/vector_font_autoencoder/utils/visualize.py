@@ -5,7 +5,7 @@ import seaborn as sns
 from torch import Tensor
 from torchfont.io.pens import TYPE_TO_IDX
 
-from vector_font_disentanglement.utils.pen import PlotPen
+from vector_font_autoencoder.utils.pen import PlotPen
 
 palette = sns.color_palette("deep")
 bluegray = palette[0]

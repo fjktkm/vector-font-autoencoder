@@ -1394,7 +1394,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vector-font-disentanglement"
+name = "vector-font-autoencoder"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

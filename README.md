@@ -1,3 +1,3 @@
-# Vector Font Disentanglement
+# Vector Font Autoencoder
 
-Total Disentanglement of Vector Fonts into Style and Character Class Features
+Sequence-to-sequence autoencoder for scalable reconstruction and generation of vector glyphs.

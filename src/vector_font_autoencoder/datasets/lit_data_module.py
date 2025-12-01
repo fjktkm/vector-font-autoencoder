@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import torch
@@ -17,19 +17,14 @@ from torchfont.transforms import (
 
 def collate_fn(
     batch: Sequence[tuple[tuple[Tensor, Tensor], tuple[int, int]]],
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     types_list = [types for (types, _), _ in batch]
     coords_list = [coords for (_, coords), _ in batch]
-    style_label_list = [style for _, (style, _) in batch]
-    content_label_list = [content for _, (_, content) in batch]
 
     types_tensor = pad_sequence(types_list, batch_first=True, padding_value=0)
     coords_tensor = pad_sequence(coords_list, batch_first=True, padding_value=0.0)
 
-    style_label_tensor = torch.as_tensor(style_label_list, dtype=torch.long)
-    content_label_tensor = torch.as_tensor(content_label_list, dtype=torch.long)
-
-    return types_tensor, coords_tensor, style_label_tensor, content_label_tensor
+    return types_tensor, coords_tensor
 
 
 class LitGoogleFonts(LightningDataModule):
@@ -72,14 +67,10 @@ class LitGoogleFonts(LightningDataModule):
         )
         self.commit_hash = self.dataset.commit_hash
         self.dataset_len = len(self.dataset)
-        self.num_style_classes = self.dataset.num_style_classes
-        self.num_content_classes = self.dataset.num_content_classes
         self.save_hyperparameters(
             {
                 "commit_hash": self.commit_hash,
                 "dataset_len": self.dataset_len,
-                "num_style_classes": self.num_style_classes,
-                "num_content_classes": self.num_content_classes,
             },
         )
 
@@ -190,7 +181,9 @@ class LitGoogleFonts(LightningDataModule):
         ]
         return CombinedLoader(loaders, mode="sequential")
 
-    def interpolate_dataloader(self) -> CombinedLoader:
+    def interpolate_dataloader(
+        self,
+    ) -> Iterable[tuple[tuple[Tensor, Tensor], tuple[Tensor, Tensor]]]:
         transform = Compose(
             [
                 LimitSequenceLength(max_len=self.max_seq_len),
@@ -223,4 +216,4 @@ class LitGoogleFonts(LightningDataModule):
             for dataset in datasets
         ]
 
-        return CombinedLoader(loaders)
+        return zip(*loaders, strict=False)

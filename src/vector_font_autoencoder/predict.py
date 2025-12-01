@@ -6,8 +6,8 @@ import lightning.pytorch as pl
 import torch
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
-from vector_font_disentanglement.datasets.lit_data_module import LitGoogleFonts
-from vector_font_disentanglement.models.lit_module import LitFontAutoencoder
+from vector_font_autoencoder.datasets.lit_data_module import LitGoogleFonts
+from vector_font_autoencoder.models.lit_module import LitFontAutoencoder
 
 logging.getLogger("fontTools").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning)

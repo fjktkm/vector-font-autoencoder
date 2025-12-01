@@ -11,8 +11,8 @@ from lightning.pytorch.callbacks import (
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from lightning.pytorch.profilers import SimpleProfiler
 
-from vector_font_disentanglement.datasets.lit_data_module import LitGoogleFonts
-from vector_font_disentanglement.models.lit_module import LitFontAutoencoder
+from vector_font_autoencoder.datasets.lit_data_module import LitGoogleFonts
+from vector_font_autoencoder.models.lit_module import LitFontAutoencoder
 
 logging.getLogger("fontTools").setLevel(logging.ERROR)
 
@@ -34,7 +34,7 @@ def main() -> None:
     checkpoint = ModelCheckpoint(
         monitor="val_loss",
         mode="min",
-        filename="vector-font-disentanglement-{epoch:02d}-{val_loss:.2f}",
+        filename="vector-font-autoencoder-{epoch:02d}-{val_loss:.2f}",
     )
     lr_monitor = LearningRateMonitor(logging_interval="step")
     summary = ModelSummary(max_depth=2)
