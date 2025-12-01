@@ -34,7 +34,7 @@ class LitGoogleFonts(LightningDataModule):
         ref: str = "main",
         max_len: int = 512,
         patch_size: int = 32,
-        batch_size: int = 512,
+        batch_size: int = 128,
         num_shards: int = 8,
         num_workers: int = 2,
         prefetch_factor: int = 2,

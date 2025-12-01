@@ -80,9 +80,9 @@ class LitFontAutoencoder(LightningModule):
     def __init__(  # noqa: PLR0913
         self,
         patch_size: int = 32,
-        d_model: int = 768,
-        nhead: int = 12,
-        dim_feedforward: int = 3072,
+        d_model: int = 2048,
+        nhead: int = 16,
+        dim_feedforward: int = 8192,
         num_layers: int = 6,
         lr: float = 1e-4,
     ) -> None:
